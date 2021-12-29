@@ -656,6 +656,14 @@ namespace Unity.Netcode.Components
 
             Debug.DrawLine(newState.Position, newState.Position + Vector3.up + Vector3.left, Color.green, 10, false);
 
+            //If InLocalSpace has changed, all interpolation buffers are essentially wrong
+            //maybe correct buffer instead of resetting it in the future?
+            if (oldState.InLocalSpace != newState.InLocalSpace)
+            {
+                m_LocalAuthoritativeNetworkState = newState;
+                ResetInterpolatedStateToCurrentAuthoritativeState();
+            }
+
             AddInterpolatedState(newState);
 
             if (m_CachedNetworkManager.LogLevel == LogLevel.Developer)
