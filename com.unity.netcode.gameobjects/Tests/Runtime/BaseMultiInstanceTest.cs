@@ -3,6 +3,7 @@ using System.Collections;
 using System.Linq;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 using Object = UnityEngine.Object;
 
@@ -10,6 +11,8 @@ namespace Unity.Netcode.RuntimeTests
 {
     public abstract class BaseMultiInstanceTest
     {
+        private const string k_FirstPartOfTestRunnerSceneName = "InitTestScene";
+
         protected GameObject m_PlayerPrefab;
         protected NetworkManager m_ServerNetworkManager;
         protected NetworkManager[] m_ClientNetworkManagers;
@@ -30,13 +33,9 @@ namespace Unity.Netcode.RuntimeTests
             // Shutdown and clean up both of our NetworkManager instances
             try
             {
-                if (MultiInstanceHelpers.ClientSceneHandler != null)
-                {
-                    MultiInstanceHelpers.ClientSceneHandler.CanClientsLoad -= ClientSceneHandler_CanClientsLoad;
-                    MultiInstanceHelpers.ClientSceneHandler.CanClientsUnload -= ClientSceneHandler_CanClientsUnload;
-                }
                 MultiInstanceHelpers.Destroy();
             }
+            catch (Exception e) { throw e; }
             finally
             {
                 if (m_PlayerPrefab != null)
@@ -46,8 +45,8 @@ namespace Unity.Netcode.RuntimeTests
                 }
             }
 
-            // Make sure we clean up after ourselves and destroy any remaining NetworkObjects
-            // before we exit our test
+            // Make sure any NetworkObject with a GlobalObjectIdHash value of 0 is destroyed
+            // If we are tearing down, we don't want to leave NetworkObjects hanging around
             var networkObjects = Object.FindObjectsOfType<NetworkObject>().ToList();
             foreach (var networkObject in networkObjects)
             {
@@ -60,41 +59,48 @@ namespace Unity.Netcode.RuntimeTests
         }
 
         /// <summary>
-        /// Override this method to control when clients
-        /// fake-load a scene.
+        /// We want to exclude the TestRunner scene on the host-server side so it won't try to tell clients to
+        /// synchronize to this scene when they connect
         /// </summary>
-        protected virtual bool CanClientsLoad()
+        private static bool VerifySceneIsValidForClientsToLoad(int sceneIndex, string sceneName, LoadSceneMode loadSceneMode)
         {
+            // exclude test runner scene
+            if (sceneName.StartsWith(k_FirstPartOfTestRunnerSceneName))
+            {
+                return false;
+            }
             return true;
         }
 
         /// <summary>
-        /// Override this method to control when clients
-        /// fake-unload a scene.
+        /// This registers scene validation callback for the server to prevent it from telling connecting
+        /// clients to synchronize (i.e. load) the test runner scene.  This will also register the test runner
+        /// scene and its handle for both client(s) and server-host.
         /// </summary>
-        protected virtual bool CanClientsUnload()
+        public static void SceneManagerValidationAndTestRunnerInitialization(NetworkManager networkManager)
         {
-            return true;
-        }
+            // If VerifySceneBeforeLoading is not already set, then go ahead and set it so the host/server
+            // will not try to synchronize clients to the TestRunner scene.  We only need to do this for the server.
+            if (networkManager.IsServer && networkManager.SceneManager.VerifySceneBeforeLoading == null)
+            {
+                networkManager.SceneManager.VerifySceneBeforeLoading = VerifySceneIsValidForClientsToLoad;
+                // If a unit/integration test does not handle this on their own, then Ignore the validation warning
+                networkManager.SceneManager.DisableValidationWarnings(true);
+            }
 
-        /// <summary>
-        /// Registers the CanClientsLoad and CanClientsUnload events of the
-        /// ClientSceneHandler (default is IntegrationTestSceneHandler).
-        /// </summary>
-        protected void RegisterSceneManagerHandler()
-        {
-            MultiInstanceHelpers.ClientSceneHandler.CanClientsLoad += ClientSceneHandler_CanClientsLoad;
-            MultiInstanceHelpers.ClientSceneHandler.CanClientsUnload += ClientSceneHandler_CanClientsUnload;
-        }
-
-        private bool ClientSceneHandler_CanClientsUnload()
-        {
-            return CanClientsUnload();
-        }
-
-        private bool ClientSceneHandler_CanClientsLoad()
-        {
-            return CanClientsLoad();
+            // Register the test runner scene so it will be able to synchronize NetworkObjects without logging a
+            // warning about using the currently active scene
+            var scene = SceneManager.GetActiveScene();
+            // As long as this is a test runner scene (or most likely a test runner scene)
+            if (scene.name.StartsWith(k_FirstPartOfTestRunnerSceneName))
+            {
+                // Register the test runner scene just so we avoid another warning about not being able to find the
+                // scene to synchronize NetworkObjects.  Next, add the currently active test runner scene to the scenes
+                // loaded and register the server to client scene handle since host-server shares the test runner scene
+                // with the clients.
+                networkManager.SceneManager.GetAndAddNewlyLoadedSceneByName(scene.name);
+                networkManager.SceneManager.ServerSceneHandleToClientSceneHandle.Add(scene.handle, scene.handle);
+            }
         }
 
         /// <summary>
@@ -106,9 +112,10 @@ namespace Unity.Netcode.RuntimeTests
         /// <returns></returns>
         public IEnumerator StartSomeClientsAndServerWithPlayers(bool useHost, int nbClients, Action<GameObject> updatePlayerPrefab = null, int targetFrameRate = 60)
         {
-            // Make sure there are no remaining NetworkObjects from a previous test
-            // before we start our new test
+            // Make sure any NetworkObject with a GlobalObjectIdHash value of 0 is destroyed
+            // If we are tearing down, we don't want to leave NetworkObjects hanging around
             var networkObjects = Object.FindObjectsOfType<NetworkObject>().ToList();
+            var networkObjectsList = networkObjects.Where(c => c.GlobalObjectIdHash == 0);
             foreach (var netObject in networkObjects)
             {
                 Object.DestroyImmediate(netObject);
@@ -154,13 +161,11 @@ namespace Unity.Netcode.RuntimeTests
             {
                 // Start the instances and pass in our SceneManagerInitialization action that is invoked immediately after host-server
                 // is started and after each client is started.
-                if (!MultiInstanceHelpers.Start(useHost, server, clients))
+                if (!MultiInstanceHelpers.Start(useHost, server, clients, SceneManagerValidationAndTestRunnerInitialization))
                 {
                     Debug.LogError("Failed to start instances");
                     Assert.Fail("Failed to start instances");
                 }
-
-                RegisterSceneManagerHandler();
 
                 // Wait for connection on client side
                 yield return MultiInstanceHelpers.Run(MultiInstanceHelpers.WaitForClientsConnected(clients));

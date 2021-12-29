@@ -22,11 +22,6 @@ namespace TestProject.ManualTests
                 {
                     ChangeDirection(true, true);
                 }
-
-                if (!IsServer)
-                {
-                    m_Rigidbody.isKinematic = true;
-                }
             }
         }
 

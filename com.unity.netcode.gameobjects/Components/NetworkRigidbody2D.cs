@@ -32,7 +32,7 @@ namespace Unity.Netcode.Components
 
         private void FixedUpdate()
         {
-            if (IsSpawned)
+            if (NetworkManager.IsListening)
             {
                 if (HasAuthority != m_IsAuthority)
                 {
@@ -74,6 +74,7 @@ namespace Unity.Netcode.Components
         /// <inheritdoc />
         public override void OnNetworkDespawn()
         {
+            m_IsAuthority = false;
             UpdateRigidbodyKinematicMode();
         }
     }

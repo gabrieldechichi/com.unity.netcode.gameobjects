@@ -15,6 +15,7 @@ namespace Unity.Netcode.Editor
         private static GUIStyle s_HelpBoxStyle;
 
         // Properties
+        private SerializedProperty m_DontDestroyOnLoadProperty;
         private SerializedProperty m_RunInBackgroundProperty;
         private SerializedProperty m_LogLevelProperty;
 
@@ -84,6 +85,7 @@ namespace Unity.Netcode.Editor
             m_NetworkManager = (NetworkManager)target;
 
             // Base properties
+            m_DontDestroyOnLoadProperty = serializedObject.FindProperty(nameof(NetworkManager.DontDestroy));
             m_RunInBackgroundProperty = serializedObject.FindProperty(nameof(NetworkManager.RunInBackground));
             m_LogLevelProperty = serializedObject.FindProperty(nameof(NetworkManager.LogLevel));
             m_NetworkConfigProperty = serializedObject.FindProperty(nameof(NetworkManager.NetworkConfig));
@@ -110,6 +112,7 @@ namespace Unity.Netcode.Editor
         private void CheckNullProperties()
         {
             // Base properties
+            m_DontDestroyOnLoadProperty = serializedObject.FindProperty(nameof(NetworkManager.DontDestroy));
             m_RunInBackgroundProperty = serializedObject.FindProperty(nameof(NetworkManager.RunInBackground));
             m_LogLevelProperty = serializedObject.FindProperty(nameof(NetworkManager.LogLevel));
             m_NetworkConfigProperty = serializedObject.FindProperty(nameof(NetworkManager.NetworkConfig));
@@ -220,6 +223,7 @@ namespace Unity.Netcode.Editor
             if (!m_NetworkManager.IsServer && !m_NetworkManager.IsClient)
             {
                 serializedObject.Update();
+                EditorGUILayout.PropertyField(m_DontDestroyOnLoadProperty);
                 EditorGUILayout.PropertyField(m_RunInBackgroundProperty);
                 EditorGUILayout.PropertyField(m_LogLevelProperty);
                 EditorGUILayout.Space();
@@ -359,7 +363,7 @@ namespace Unity.Netcode.Editor
             const string getToolsText = "Access additional tools for multiplayer development by installing the Multiplayer Tools package in the Package Manager.";
             const string openDocsButtonText = "Open Docs";
             const string dismissButtonText = "Dismiss";
-            const string targetUrl = "https://docs-multiplayer.unity3d.com/docs/tools/install-tools";
+            const string targetUrl = "https://docs-multiplayer.unity3d.com/docs/tutorials/goldenpath_series/goldenpath_foundation_module";
             const string infoIconName = "console.infoicon";
 
             if (PlayerPrefs.GetInt(InstallMultiplayerToolsTipDismissedPlayerPrefKey, 0) != 0)

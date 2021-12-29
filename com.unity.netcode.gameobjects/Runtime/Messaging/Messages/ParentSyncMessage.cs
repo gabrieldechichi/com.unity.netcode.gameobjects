@@ -26,41 +26,42 @@ namespace Unity.Netcode
             }
         }
 
-        public bool Deserialize(FastBufferReader reader, ref NetworkContext context)
+        public static void Receive(FastBufferReader reader, in NetworkContext context)
         {
             var networkManager = (NetworkManager)context.SystemOwner;
             if (!networkManager.IsClient)
             {
-                return false;
+                return;
             }
 
-            reader.ReadValueSafe(out NetworkObjectId);
-            reader.ReadValueSafe(out IsReparented);
-            if (IsReparented)
+            var message = new ParentSyncMessage();
+            reader.ReadValueSafe(out message.NetworkObjectId);
+            reader.ReadValueSafe(out message.IsReparented);
+            if (message.IsReparented)
             {
-                reader.ReadValueSafe(out IsLatestParentSet);
-                if (IsLatestParentSet)
+                reader.ReadValueSafe(out message.IsLatestParentSet);
+                if (message.IsLatestParentSet)
                 {
                     reader.ReadValueSafe(out ulong latestParent);
-                    LatestParent = latestParent;
+                    message.LatestParent = latestParent;
                 }
             }
 
-            if (!networkManager.SpawnManager.SpawnedObjects.ContainsKey(NetworkObjectId))
-            {
-                networkManager.SpawnManager.TriggerOnSpawn(NetworkObjectId, reader, ref context);
-                return false;
-            }
-
-            return true;
+            message.Handle(reader, context, networkManager);
         }
 
-        public void Handle(ref NetworkContext context)
+        public void Handle(FastBufferReader reader, in NetworkContext context, NetworkManager networkManager)
         {
-            var networkManager = (NetworkManager)context.SystemOwner;
-            var networkObject = networkManager.SpawnManager.SpawnedObjects[NetworkObjectId];
-            networkObject.SetNetworkParenting(IsReparented, LatestParent);
-            networkObject.ApplyNetworkParenting();
+            if (networkManager.SpawnManager.SpawnedObjects.ContainsKey(NetworkObjectId))
+            {
+                var networkObject = networkManager.SpawnManager.SpawnedObjects[NetworkObjectId];
+                networkObject.SetNetworkParenting(IsReparented, LatestParent);
+                networkObject.ApplyNetworkParenting();
+            }
+            else
+            {
+                networkManager.SpawnManager.TriggerOnSpawn(NetworkObjectId, reader, context);
+            }
         }
     }
 }

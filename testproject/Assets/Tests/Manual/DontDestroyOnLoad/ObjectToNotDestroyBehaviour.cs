@@ -81,7 +81,7 @@ namespace TestProject.ManualTests
         /// <returns></returns>
         private IEnumerator SendContinualPing()
         {
-            while (m_ContinueSendingPing && NetworkManager.IsListening)
+            while (m_ContinueSendingPing)
             {
                 m_PingCounter++;
                 PingUpdateClientRpc(m_PingCounter);

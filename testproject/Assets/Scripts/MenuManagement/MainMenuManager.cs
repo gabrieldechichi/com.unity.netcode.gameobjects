@@ -3,34 +3,12 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
-
 /// <summary>
 /// Main Menu Manager only accepts types of MenuReference
 /// </summary>
 public class MainMenuManager : MenuManager<MenuReference>
 {
-    public static List<MainMenuManager> Managers = new List<MainMenuManager>();
 
-    public List<string> GetAllMenuScenes()
-    {
-        var allSceneReferences = new List<string>();
-
-        foreach (var keypair in m_SceneMenuReferencesByDisplayName)
-        {
-            allSceneReferences.AddRange(keypair.Value.GetReferencedScenes());
-        }
-        return allSceneReferences;
-    }
-
-    protected override void OnAwake()
-    {
-        Managers.Add(this);
-    }
-
-    protected override void OnDestroyInvoked()
-    {
-        Managers.Remove(this);
-    }
 }
 
 
@@ -58,15 +36,10 @@ public class MenuManager<T> : MonoBehaviour where T : ISceneReference
 
     protected Dictionary<string, T> m_SceneMenuReferencesByDisplayName = new Dictionary<string, T>();
 
-    protected virtual void OnAwake()
-    {
-
-    }
 
     private void Awake()
     {
         Screen.SetResolution(HorizontalResolution, VerticalResolution, false);
-        OnAwake();
     }
 
     protected virtual void OnBuildMenuList()
@@ -106,16 +79,6 @@ public class MenuManager<T> : MonoBehaviour where T : ISceneReference
     public void SelectMenuScene()
     {
         OnSelectMenuScene();
-    }
-
-    protected virtual void OnDestroyInvoked()
-    {
-
-    }
-
-    private void OnDestroy()
-    {
-        OnDestroyInvoked();
     }
 
 }

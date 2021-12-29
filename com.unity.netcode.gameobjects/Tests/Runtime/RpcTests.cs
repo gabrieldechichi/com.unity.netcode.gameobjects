@@ -10,13 +10,13 @@ namespace Unity.Netcode.RuntimeTests
     {
         public class RpcTestNB : NetworkBehaviour
         {
-            public event Action<ulong, ServerRpcParams> OnServer_Rpc;
+            public event Action OnServer_Rpc;
             public event Action OnClient_Rpc;
 
             [ServerRpc]
-            public void MyServerRpc(ulong clientId, ServerRpcParams param = default)
+            public void MyServerRpc()
             {
-                OnServer_Rpc(clientId, param);
+                OnServer_Rpc();
             }
 
             [ClientRpc]
@@ -42,12 +42,11 @@ namespace Unity.Netcode.RuntimeTests
         {
             // This is the *SERVER VERSION* of the *CLIENT PLAYER*
             var serverClientPlayerResult = new MultiInstanceHelpers.CoroutineResultWrapper<NetworkObject>();
-            var clientId = m_ClientNetworkManagers[0].LocalClientId;
-            yield return MultiInstanceHelpers.Run(MultiInstanceHelpers.GetNetworkObjectByRepresentation((x => x.IsPlayerObject && x.OwnerClientId == clientId), m_ServerNetworkManager, serverClientPlayerResult));
+            yield return MultiInstanceHelpers.Run(MultiInstanceHelpers.GetNetworkObjectByRepresentation((x => x.IsPlayerObject && x.OwnerClientId == m_ClientNetworkManagers[0].LocalClientId), m_ServerNetworkManager, serverClientPlayerResult));
 
             // This is the *CLIENT VERSION* of the *CLIENT PLAYER*
             var clientClientPlayerResult = new MultiInstanceHelpers.CoroutineResultWrapper<NetworkObject>();
-            yield return MultiInstanceHelpers.Run(MultiInstanceHelpers.GetNetworkObjectByRepresentation((x => x.IsPlayerObject && x.OwnerClientId == clientId), m_ClientNetworkManagers[0], clientClientPlayerResult));
+            yield return MultiInstanceHelpers.Run(MultiInstanceHelpers.GetNetworkObjectByRepresentation((x => x.IsPlayerObject && x.OwnerClientId == m_ClientNetworkManagers[0].LocalClientId), m_ClientNetworkManagers[0], clientClientPlayerResult));
 
             // Setup state
             bool hasReceivedServerRpc = false;
@@ -60,16 +59,15 @@ namespace Unity.Netcode.RuntimeTests
                 hasReceivedClientRpcRemotely = true;
             };
 
-            clientClientPlayerResult.Result.GetComponent<RpcTestNB>().OnServer_Rpc += (clientId, param) =>
+            clientClientPlayerResult.Result.GetComponent<RpcTestNB>().OnServer_Rpc += () =>
             {
                 // The RPC invoked locally. (Weaver failure?)
                 Assert.Fail("ServerRpc invoked locally. Weaver failure?");
             };
 
-            serverClientPlayerResult.Result.GetComponent<RpcTestNB>().OnServer_Rpc += (clientId, param) =>
+            serverClientPlayerResult.Result.GetComponent<RpcTestNB>().OnServer_Rpc += () =>
             {
                 Debug.Log("ServerRpc received on server object");
-                Assert.True(param.Receive.SenderClientId == clientId);
                 hasReceivedServerRpc = true;
             };
 
@@ -81,19 +79,13 @@ namespace Unity.Netcode.RuntimeTests
             };
 
             // Send ServerRpc
-            clientClientPlayerResult.Result.GetComponent<RpcTestNB>().MyServerRpc(clientId);
+            clientClientPlayerResult.Result.GetComponent<RpcTestNB>().MyServerRpc();
 
             // Send ClientRpc
             serverClientPlayerResult.Result.GetComponent<RpcTestNB>().MyClientRpc();
 
-            var clientMessageResult = new MultiInstanceHelpers.CoroutineResultWrapper<bool>();
-            var serverMessageResult = new MultiInstanceHelpers.CoroutineResultWrapper<bool>();
-            // Wait for RPCs to be received - client and server should each receive one.
-            yield return MultiInstanceHelpers.RunMultiple(new[]
-            {
-                MultiInstanceHelpers.WaitForMessageOfType<ClientRpcMessage>(m_ClientNetworkManagers[0], clientMessageResult),
-                MultiInstanceHelpers.WaitForMessageOfType<ServerRpcMessage>(m_ServerNetworkManager, serverMessageResult),
-            });
+            // Wait for RPCs to be received
+            yield return MultiInstanceHelpers.Run(MultiInstanceHelpers.WaitForCondition(() => hasReceivedServerRpc && hasReceivedClientRpcLocally && hasReceivedClientRpcRemotely));
 
             Assert.True(hasReceivedServerRpc, "ServerRpc was not received");
             Assert.True(hasReceivedClientRpcLocally, "ClientRpc was not locally received on the server");

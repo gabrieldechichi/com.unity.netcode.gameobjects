@@ -15,10 +15,8 @@ namespace Unity.Netcode.RuntimeTests.Metrics
     public class MessagingMetricsTests : DualClientMetricTestBase
     {
         private const uint k_MessageNameHashSize = 8;
-        // Header is dynamically sized due to packing, will be 2 bytes for all test messages.
-        private const int k_MessageHeaderSize = 2;
-        private static readonly int k_NamedMessageOverhead = (int)k_MessageNameHashSize + k_MessageHeaderSize;
-        private static readonly int k_UnnamedMessageOverhead = k_MessageHeaderSize;
+        private static readonly int k_NamedMessageOverhead = (int)k_MessageNameHashSize + FastBufferWriter.GetWriteSize<MessageHeader>();
+        private static readonly int k_UnnamedMessageOverhead = FastBufferWriter.GetWriteSize<MessageHeader>();
 
         protected override int NbClients => 2;
 
@@ -38,9 +36,11 @@ namespace Unity.Netcode.RuntimeTests.Metrics
             yield return waitForMetricValues.WaitForMetricsReceived();
 
             var networkMessageSentMetricValues = waitForMetricValues.AssertMetricValuesHaveBeenFound();
+            Assert.AreEqual(1, networkMessageSentMetricValues.Count);
 
-            // We should have 1 NamedMessage and some potential SnapshotMessage
-            Assert.That(networkMessageSentMetricValues, Has.Exactly(1).Matches<NetworkMessageEvent>(x => x.Name == nameof(NamedMessage)));
+            var networkMessageEvent = networkMessageSentMetricValues.First();
+            Assert.AreEqual(nameof(NamedMessage), networkMessageEvent.Name);
+            Assert.AreEqual(FirstClient.LocalClientId, networkMessageEvent.Connection.Id);
         }
 
         [UnityTest]
@@ -63,7 +63,6 @@ namespace Unity.Netcode.RuntimeTests.Metrics
         }
 
         [UnityTest]
-        [Ignore("Snapshot transition")]
         public IEnumerator TrackNetworkMessageReceivedMetric()
         {
             var messageName = Guid.NewGuid();
@@ -84,12 +83,13 @@ namespace Unity.Netcode.RuntimeTests.Metrics
             yield return waitForMetricValues.WaitForMetricsReceived();
 
             var networkMessageReceivedValues = waitForMetricValues.AssertMetricValuesHaveBeenFound();
-            // We should have 1 NamedMessage and some potential SnapshotMessage
-            Assert.That(networkMessageReceivedValues, Has.Exactly(1).Matches<NetworkMessageEvent>(x => x.Name == nameof(NamedMessage)));
+            Assert.AreEqual(1, networkMessageReceivedValues.Count(x => x.Name.Equals(nameof(NamedMessage))));
+
+            var namedMessageReceived = networkMessageReceivedValues.First();
+            Assert.AreEqual(Server.LocalClientId, namedMessageReceived.Connection.Id);
         }
 
         [UnityTest]
-        [Ignore("Snapshot transition")]
         public IEnumerator TrackNamedMessageSentMetric()
         {
             var waitForMetricValues = new WaitForMetricValues<NamedMessageEvent>(ServerMetrics.Dispatcher, NetworkMetricTypes.NamedMessageSent);

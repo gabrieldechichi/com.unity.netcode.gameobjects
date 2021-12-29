@@ -32,7 +32,7 @@ promote_{{ project.name }}_{{ package.name }}:
     UPMCI_PROMOTION: 1
   commands:
     - npm install upm-ci-utils@stable -g --registry https://artifactory.prd.cds.internal.unity3d.com/artifactory/api/npm/upm-npm
-    - upm-ci package promote --package-path {{ package.path }} 
+    - upm-ci package promote --package-path {{ package.path }}
   artifacts:
     artifacts:
       paths:

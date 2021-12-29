@@ -13,9 +13,7 @@ namespace Unity.Netcode.RuntimeTests.Metrics
 {
     internal class NetworkObjectMetricsTests : SingleClientMetricTestBase
     {
-        // Keep less than 23 chars to avoid issues if compared against a 32-byte fixed string
-        //     since it will have "(Clone)" appended
-        private const string k_NewNetworkObjectName = "TestObjectToSpawn";
+        private const string k_NewNetworkObjectName = "TestNetworkObjectToSpawn";
         private NetworkObject m_NewNetworkPrefab;
 
         protected override Action<GameObject> UpdatePlayerPrefab => _ =>
@@ -94,7 +92,7 @@ namespace Unity.Netcode.RuntimeTests.Metrics
             yield return waitForMetricEvent.WaitForMetricsReceived();
 
             var objectDestroyedSentMetricValues = waitForMetricEvent.AssertMetricValuesHaveBeenFound();
-            Assert.AreEqual(1, objectDestroyedSentMetricValues.Count);
+            Assert.AreEqual(2, objectDestroyedSentMetricValues.Count); // As there's a client and server, this event is emitted twice.
 
             var objectDestroyed = objectDestroyedSentMetricValues.Last();
             Assert.AreEqual(Client.LocalClientId, objectDestroyed.Connection.Id);

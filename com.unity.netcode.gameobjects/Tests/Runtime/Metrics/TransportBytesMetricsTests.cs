@@ -13,12 +13,9 @@ namespace Unity.Netcode.RuntimeTests.Metrics
 {
     internal class TransportBytesMetricsTests : SingleClientMetricTestBase
     {
-        // Header is dynamically sized due to packing, will be 2 bytes for all test messages.
-        private const int k_MessageHeaderSize = 2;
-        static readonly long MessageOverhead = 8 + FastBufferWriter.GetWriteSize<BatchHeader>() + k_MessageHeaderSize;
+        static readonly long MessageOverhead = 8 + FastBufferWriter.GetWriteSize<BatchHeader>() + FastBufferWriter.GetWriteSize<MessageHeader>();
 
         [UnityTest]
-        [Ignore("Snapshot transition")]
         public IEnumerator TrackTotalNumberOfBytesSent()
         {
             var messageName = Guid.NewGuid();
@@ -27,7 +24,7 @@ namespace Unity.Netcode.RuntimeTests.Metrics
             try
             {
                 writer.WriteValueSafe(messageName);
-
+                
                 Server.CustomMessagingManager.SendNamedMessage(messageName.ToString(), Client.LocalClientId, writer);
             }
             finally
@@ -47,7 +44,6 @@ namespace Unity.Netcode.RuntimeTests.Metrics
         }
 
         [UnityTest]
-        [Ignore("Snapshot transition")]
         public IEnumerator TrackTotalNumberOfBytesReceived()
         {
             var messageName = Guid.NewGuid();
@@ -56,7 +52,7 @@ namespace Unity.Netcode.RuntimeTests.Metrics
             try
             {
                 writer.WriteValueSafe(messageName);
-
+                
                 Server.CustomMessagingManager.SendNamedMessage(messageName.ToString(), Client.LocalClientId, writer);
             }
             finally

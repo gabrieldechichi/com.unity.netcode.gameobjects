@@ -52,35 +52,35 @@ namespace Unity.Netcode.RuntimeTests.Physics
             yield return MultiInstanceHelpers.Run(MultiInstanceHelpers.GetNetworkObjectByRepresentation((x => x.IsPlayerObject && x.OwnerClientId == m_ClientNetworkManagers[0].LocalClientId), m_ClientNetworkManagers[0], clientClientPlayerResult));
             var clientPlayer = clientClientPlayerResult.Result.gameObject;
 
-            Assert.IsNotNull(serverPlayer, "serverPlayer is not null");
-            Assert.IsNotNull(clientPlayer, "clientPlayer is not null");
+            Assert.IsNotNull(serverPlayer);
+            Assert.IsNotNull(clientPlayer);
 
-            yield return WaitForTicks(m_ServerNetworkManager, 3);
+            yield return WaitForFrames(5);
 
             // server rigidbody has authority and should have a kinematic mode of false
-            Assert.True(serverPlayer.GetComponent<Rigidbody>().isKinematic == Kinematic, "serverPlayer kinematic");
-            Assert.AreEqual(RigidbodyInterpolation.Interpolate, serverPlayer.GetComponent<Rigidbody>().interpolation, "server equal interpolate");
+            Assert.True(serverPlayer.GetComponent<Rigidbody>().isKinematic == Kinematic);
+            Assert.AreEqual(RigidbodyInterpolation.Interpolate, serverPlayer.GetComponent<Rigidbody>().interpolation);
 
             // client rigidbody has no authority and should have a kinematic mode of true
-            Assert.True(clientPlayer.GetComponent<Rigidbody>().isKinematic, "clientPlayer kinematic");
-            Assert.AreEqual(RigidbodyInterpolation.None, clientPlayer.GetComponent<Rigidbody>().interpolation, "client equal interpolate");
+            Assert.True(clientPlayer.GetComponent<Rigidbody>().isKinematic);
+            Assert.AreEqual(RigidbodyInterpolation.None, clientPlayer.GetComponent<Rigidbody>().interpolation);
 
             // despawn the server player (but keep it around on the server)
             serverPlayer.GetComponent<NetworkObject>().Despawn(false);
 
-            yield return WaitForTicks(m_ServerNetworkManager, 3);
+            yield return WaitForFrames(5);
 
-            Assert.IsTrue(serverPlayer.GetComponent<Rigidbody>().isKinematic == Kinematic, "serverPlayer second kinematic");
+            Assert.IsTrue(serverPlayer.GetComponent<Rigidbody>().isKinematic == Kinematic);
 
-            yield return WaitForTicks(m_ServerNetworkManager, 3);
+            yield return WaitForFrames(5);
 
-            Assert.IsTrue(clientPlayer == null, "clientPlayer being null"); // safety check that object is actually despawned.
+            Assert.IsTrue(clientPlayer == null); // safety check that object is actually despawned.
         }
 
-        public IEnumerator WaitForTicks(NetworkManager networkManager, int count)
+        public static IEnumerator WaitForFrames(int count)
         {
-            int nextTick = networkManager.NetworkTickSystem.LocalTime.Tick + count;
-            yield return new WaitUntil(() => networkManager.NetworkTickSystem.LocalTime.Tick >= nextTick);
+            int nextFrameNumber = Time.frameCount + count;
+            yield return new WaitUntil(() => Time.frameCount >= nextFrameNumber);
         }
     }
 }

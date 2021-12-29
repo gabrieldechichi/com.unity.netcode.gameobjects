@@ -1,6 +1,5 @@
 using System.Collections;
 using System.Collections.Generic;
-using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
 
@@ -143,7 +142,6 @@ namespace Unity.Netcode.RuntimeTests
         }
 
         [UnityTest]
-        [Ignore("Snapshot transition")]
         public IEnumerator HiddenVariableTest()
         {
             HiddenVariableObject.SpawnCount = 0;

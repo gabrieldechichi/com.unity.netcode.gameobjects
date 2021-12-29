@@ -48,14 +48,8 @@ public class CommandLineProcessor
             {
                 var value = i < args.Length - 1 ? args[i + 1].ToLower() : null;
                 value = (value?.StartsWith("-") ?? false) ? null : value;
-                if (!m_CommandLineArguments.ContainsKey(arg))
-                {
-                    m_CommandLineArguments.Add(arg, value);
-                }
-                else
-                {
-                    Debug.LogWarning($"Duplicate command line argument for {arg} - ignoring");
-                }
+
+                m_CommandLineArguments.Add(arg, value);
             }
         }
 
@@ -72,6 +66,7 @@ public class CommandLineProcessor
                 case "host":
                 case "client":
                     {
+
                         return true;
                     }
             }
@@ -208,9 +203,6 @@ public class CommandLineProcessor
             case UNetTransport unetTransport:
                 unetTransport.ConnectAddress = address;
                 break;
-            case UnityTransport unityTransport:
-                unityTransport.ConnectionData.Address = address;
-                break;
         }
     }
 
@@ -223,9 +215,6 @@ public class CommandLineProcessor
                 unetTransport.ConnectPort = port;
                 unetTransport.ServerListenPort = port;
                 break;
-            case UnityTransport unityTransport:
-                unityTransport.ConnectionData.Port = port;
-                break;
         }
     }
 }
@@ -236,12 +225,12 @@ public class CommandLineProcessor
 /// </summary>
 public class CommandLineHandler : MonoBehaviour
 {
-    internal static CommandLineProcessor CommandLineProcessorInstance;
+    private static CommandLineProcessor s_CommandLineProcessorInstance;
     private void Start()
     {
-        if (CommandLineProcessorInstance == null)
+        if (s_CommandLineProcessorInstance == null)
         {
-            CommandLineProcessorInstance = new CommandLineProcessor(Environment.GetCommandLineArgs());
+            s_CommandLineProcessorInstance = new CommandLineProcessor(Environment.GetCommandLineArgs());
         }
 
     }

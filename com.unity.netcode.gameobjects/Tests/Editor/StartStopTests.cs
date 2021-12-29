@@ -45,24 +45,11 @@ namespace Unity.Netcode.EditorTests
         public void TestFlagShutdown()
         {
             m_NetworkManager.StartServer();
-            m_NetworkManager.ShutdownInternal();
+            m_NetworkManager.Shutdown();
 
             Assert.False(m_NetworkManager.IsServer);
             Assert.False(m_NetworkManager.IsClient);
             Assert.False(m_NetworkManager.IsHost);
-        }
-
-        [Test]
-        public void TestShutdownWithoutStartForExceptions()
-        {
-            m_NetworkManager.ShutdownInternal();
-        }
-
-        [Test]
-        public void TestShutdownWithoutConfigForExceptions()
-        {
-            m_NetworkManager.NetworkConfig = null;
-            m_NetworkManager.ShutdownInternal();
         }
 
         [TearDown]

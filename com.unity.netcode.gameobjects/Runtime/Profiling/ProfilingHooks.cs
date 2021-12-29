@@ -37,14 +37,14 @@ namespace Unity.Netcode
             return marker;
         }
 
-        public void OnBeforeSendMessage<T>(ulong clientId, ref T message, NetworkDelivery delivery) where T : INetworkMessage
+        public void OnBeforeSendMessage(ulong clientId, Type messageType, NetworkDelivery delivery)
         {
-            GetSenderProfilerMarker(typeof(T)).Begin();
+            GetSenderProfilerMarker(messageType).Begin();
         }
 
-        public void OnAfterSendMessage<T>(ulong clientId, ref T message, NetworkDelivery delivery, int messageSizeBytes) where T : INetworkMessage
+        public void OnAfterSendMessage(ulong clientId, Type messageType, NetworkDelivery delivery, int messageSizeBytes)
         {
-            GetSenderProfilerMarker(typeof(T)).End();
+            GetSenderProfilerMarker(messageType).End();
         }
 
         public void OnBeforeReceiveMessage(ulong senderId, Type messageType, int messageSizeBytes)
@@ -85,16 +85,6 @@ namespace Unity.Netcode
         public bool OnVerifyCanReceive(ulong senderId, Type messageType)
         {
             return true;
-        }
-
-        public void OnBeforeHandleMessage<T>(ref T message, ref NetworkContext context) where T : INetworkMessage
-        {
-            // nop
-        }
-
-        public void OnAfterHandleMessage<T>(ref T message, ref NetworkContext context) where T : INetworkMessage
-        {
-            // nop
         }
     }
 }

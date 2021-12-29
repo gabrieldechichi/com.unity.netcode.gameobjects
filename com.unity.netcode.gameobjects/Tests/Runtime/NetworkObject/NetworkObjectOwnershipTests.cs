@@ -106,9 +106,8 @@ namespace Unity.Netcode.RuntimeTests
             var dummyNetworkObjectId = dummyNetworkObject.NetworkObjectId;
             Assert.That(dummyNetworkObjectId, Is.GreaterThan(0));
 
-            // Wait for two snapshot messages, because there's likely one already in flight that doesn't have the spawn yet.
-            yield return MultiInstanceHelpers.WaitForMessageOfType<SnapshotDataMessage>(m_ClientNetworkManagers[0]);
-            yield return MultiInstanceHelpers.WaitForMessageOfType<SnapshotDataMessage>(m_ClientNetworkManagers[0]);
+            int nextFrameNumber = Time.frameCount + 2;
+            yield return new WaitUntil(() => Time.frameCount >= nextFrameNumber);
 
             Assert.That(m_ServerNetworkManager.SpawnManager.SpawnedObjects.ContainsKey(dummyNetworkObjectId));
             foreach (var clientNetworkManager in m_ClientNetworkManagers)
@@ -116,9 +115,6 @@ namespace Unity.Netcode.RuntimeTests
                 Assert.That(clientNetworkManager.SpawnManager.SpawnedObjects.ContainsKey(dummyNetworkObjectId));
             }
 
-            // Verifies that removing the ownership when the default (server) is already set does not cause
-            // a Key Not Found Exception
-            m_ServerNetworkManager.SpawnManager.RemoveOwnership(dummyNetworkObject);
 
             var serverObject = m_ServerNetworkManager.SpawnManager.SpawnedObjects[dummyNetworkObjectId];
             var clientObject = m_ClientNetworkManagers[0].SpawnManager.SpawnedObjects[dummyNetworkObjectId];
@@ -137,14 +133,17 @@ namespace Unity.Netcode.RuntimeTests
             Assert.That(m_ServerNetworkManager.ConnectedClients.ContainsKey(m_ClientNetworkManagers[0].LocalClientId));
             serverObject.ChangeOwnership(m_ClientNetworkManagers[0].LocalClientId);
 
-            yield return MultiInstanceHelpers.WaitForMessageOfType<ChangeOwnershipMessage>(m_ClientNetworkManagers[0]);
+            nextFrameNumber = Time.frameCount + 2;
+            yield return new WaitUntil(() => Time.frameCount >= nextFrameNumber);
 
 
             Assert.That(clientComponent.OnGainedOwnershipFired);
             Assert.That(clientComponent.CachedOwnerIdOnGainedOwnership, Is.EqualTo(m_ClientNetworkManagers[0].LocalClientId));
             serverObject.ChangeOwnership(m_ServerNetworkManager.ServerClientId);
 
-            yield return MultiInstanceHelpers.WaitForMessageOfType<ChangeOwnershipMessage>(m_ClientNetworkManagers[0]);
+            nextFrameNumber = Time.frameCount + 2;
+            yield return new WaitUntil(() => Time.frameCount >= nextFrameNumber);
+
 
             Assert.That(serverObject.OwnerClientId, Is.EqualTo(m_ServerNetworkManager.LocalClientId));
             Assert.That(clientComponent.OnLostOwnershipFired);

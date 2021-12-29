@@ -9,28 +9,25 @@ namespace Unity.Netcode
         {
             writer.WriteValueSafe(this);
         }
-        public bool Deserialize(FastBufferReader reader, ref NetworkContext context)
+
+        public static void Receive(FastBufferReader reader, in NetworkContext context)
         {
             var networkManager = (NetworkManager)context.SystemOwner;
             if (!networkManager.IsClient)
             {
-                return false;
+                return;
             }
-            reader.ReadValueSafe(out this);
-            if (!networkManager.SpawnManager.SpawnedObjects.ContainsKey(NetworkObjectId))
-            {
-                networkManager.SpawnManager.TriggerOnSpawn(NetworkObjectId, reader, ref context);
-                return false;
-            }
-
-            return true;
+            reader.ReadValueSafe(out ChangeOwnershipMessage message);
+            message.Handle(reader, context, context.SenderId, networkManager, reader.Length);
         }
 
-        public void Handle(ref NetworkContext context)
+        public void Handle(FastBufferReader reader, in NetworkContext context, ulong senderId, NetworkManager networkManager, int messageSize)
         {
-
-            var networkManager = (NetworkManager)context.SystemOwner;
-            var networkObject = networkManager.SpawnManager.SpawnedObjects[NetworkObjectId];
+            if (!networkManager.SpawnManager.SpawnedObjects.TryGetValue(NetworkObjectId, out var networkObject))
+            {
+                networkManager.SpawnManager.TriggerOnSpawn(NetworkObjectId, reader, context);
+                return;
+            }
 
             if (networkObject.OwnerClientId == networkManager.LocalClientId)
             {
@@ -46,7 +43,7 @@ namespace Unity.Netcode
                 networkObject.InvokeBehaviourOnGainedOwnership();
             }
 
-            networkManager.NetworkMetrics.TrackOwnershipChangeReceived(context.SenderId, networkObject, context.MessageSize);
+            networkManager.NetworkMetrics.TrackOwnershipChangeReceived(senderId, networkObject, messageSize);
         }
     }
 }

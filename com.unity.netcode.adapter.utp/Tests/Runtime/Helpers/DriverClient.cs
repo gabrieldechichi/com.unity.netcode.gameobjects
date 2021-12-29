@@ -35,15 +35,10 @@ namespace Unity.Netcode.UTP.RuntimeTests
 
         private void Awake()
         {
-
             var maxCap = UnityTransport.InitialBatchQueueSize + 128;
-
-            var settings = new NetworkSettings();
-            settings.WithFragmentationStageParameters(payloadCapacity: maxCap);
-
             var fragParams = new FragmentationUtility.Parameters() { PayloadCapacity = maxCap };
 
-            m_Driver = NetworkDriver.Create(settings);
+            m_Driver = NetworkDriver.Create(fragParams);
 
             m_UnreliableSequencedPipeline = m_Driver.CreatePipeline(typeof(UnreliableSequencedPipelineStage));
             m_ReliableSequencedPipeline = m_Driver.CreatePipeline(typeof(ReliableSequencedPipelineStage));

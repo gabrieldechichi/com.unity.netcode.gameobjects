@@ -13,7 +13,7 @@ namespace Unity.Netcode.RuntimeTests
             public bool FieldWritten;
             public bool DeltaRead;
             public bool FieldRead;
-            public bool Dirty = false;
+            public bool Dirty = true;
 
             public override void ResetDirty()
             {
@@ -80,7 +80,7 @@ namespace Unity.Netcode.RuntimeTests
 
         public class DummyNetBehaviour : NetworkBehaviour
         {
-            public DummyNetVar NetVar = new DummyNetVar();
+            public DummyNetVar NetVar;
         }
         protected override int NbClients => 1;
 
@@ -115,11 +115,17 @@ namespace Unity.Netcode.RuntimeTests
             var serverComponent = (serverSideClientPlayer).GetComponent<DummyNetBehaviour>();
             var clientComponent = (clientSideClientPlayer).GetComponent<DummyNetBehaviour>();
 
-            // Send an update
-            serverComponent.NetVar.Dirty = true;
+            var waitResult = new MultiInstanceHelpers.CoroutineResultWrapper<bool>();
 
-            yield return MultiInstanceHelpers.Run(MultiInstanceHelpers.WaitForMessageOfType<NetworkVariableDeltaMessage>(m_ClientNetworkManagers[0]));
+            yield return MultiInstanceHelpers.Run(MultiInstanceHelpers.WaitForCondition(
+                () => clientComponent.NetVar.DeltaRead == true,
+                waitResult,
+                maxFrames: 120));
 
+            if (!waitResult.Result)
+            {
+                Assert.Fail("Failed to send a delta within 120 frames");
+            }
             Assert.True(serverComponent.NetVar.FieldWritten);
             Assert.True(serverComponent.NetVar.DeltaWritten);
             Assert.True(clientComponent.NetVar.FieldRead);

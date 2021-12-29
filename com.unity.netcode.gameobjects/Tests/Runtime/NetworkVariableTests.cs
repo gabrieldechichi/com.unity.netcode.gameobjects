@@ -11,19 +11,9 @@ namespace Unity.Netcode.RuntimeTests
     {
         public uint SomeInt;
         public bool SomeBool;
-        public static bool NetworkSerializeCalledOnWrite;
-        public static bool NetworkSerializeCalledOnRead;
 
         public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
         {
-            if (serializer.IsReader)
-            {
-                NetworkSerializeCalledOnRead = true;
-            }
-            else
-            {
-                NetworkSerializeCalledOnWrite = true;
-            }
             serializer.SerializeValue(ref SomeInt);
             serializer.SerializeValue(ref SomeBool);
         }
@@ -33,7 +23,6 @@ namespace Unity.Netcode.RuntimeTests
     {
         public readonly NetworkVariable<int> TheScalar = new NetworkVariable<int>();
         public readonly NetworkList<int> TheList = new NetworkList<int>();
-        public readonly NetworkList<FixedString128Bytes> TheLargeList = new NetworkList<FixedString128Bytes>();
 
         public readonly NetworkVariable<FixedString32Bytes> FixedString32 = new NetworkVariable<FixedString32Bytes>();
 
@@ -52,8 +41,6 @@ namespace Unity.Netcode.RuntimeTests
         public bool ListDelegateTriggered;
     }
 
-    [TestFixture(true)]
-    [TestFixture(false)]
     public class NetworkVariableTests : BaseMultiInstanceTest
     {
         private const string k_FixedStringTestValue = "abcdefghijklmnopqrstuvwxyz";
@@ -75,13 +62,6 @@ namespace Unity.Netcode.RuntimeTests
 
         private bool m_TestWithHost;
 
-        private bool m_EnsureLengthSafety;
-
-        public NetworkVariableTests(bool ensureLengthSafety)
-        {
-            m_EnsureLengthSafety = ensureLengthSafety;
-        }
-
         [UnitySetUp]
         public override IEnumerator Setup()
         {
@@ -90,12 +70,6 @@ namespace Unity.Netcode.RuntimeTests
                 {
                     playerPrefab.AddComponent<NetworkVariableTest>();
                 });
-
-            m_ServerNetworkManager.NetworkConfig.EnsureNetworkVariableLengthSafety = m_EnsureLengthSafety;
-            foreach (var client in m_ClientNetworkManagers)
-            {
-                client.NetworkConfig.EnsureNetworkVariableLengthSafety = m_EnsureLengthSafety;
-            }
 
             // These are the *SERVER VERSIONS* of the *CLIENT PLAYER 1 & 2*
             var result = new MultiInstanceHelpers.CoroutineResultWrapper<NetworkObject>();
@@ -228,26 +202,6 @@ namespace Unity.Netcode.RuntimeTests
         }
 
         [UnityTest]
-        public IEnumerator WhenListContainsManyLargeValues_OverflowExceptionIsNotThrown([Values(true, false)] bool useHost)
-        {
-            m_TestWithHost = useHost;
-            yield return MultiInstanceHelpers.RunAndWaitForCondition(
-                () =>
-                {
-                    for (var i = 0; i < 20; ++i)
-                    {
-                        m_Player1OnServer.TheLargeList.Add(new FixedString128Bytes());
-                    }
-                },
-                () =>
-                {
-                    return m_Player1OnServer.TheLargeList.Count == 20 &&
-                           m_Player1OnClient1.TheLargeList.Count == 20;
-                }
-            );
-        }
-
-        [UnityTest]
         public IEnumerator NetworkListContains([Values(true, false)] bool useHost)
         {
             m_TestWithHost = useHost;
@@ -260,8 +214,8 @@ namespace Unity.Netcode.RuntimeTests
                 {
                     return m_Player1OnServer.TheList.Count == 1 &&
                            m_Player1OnClient1.TheList.Count == 1 &&
-                           m_Player1OnServer.TheList.Contains(k_TestVal1) &&
-                           m_Player1OnClient1.TheList.Contains(k_TestVal1);
+                           m_Player1OnServer.TheList.Contains(k_TestKey1) &&
+                           m_Player1OnClient1.TheList.Contains(k_TestKey1);
                 }
             );
         }
@@ -364,58 +318,6 @@ namespace Unity.Netcode.RuntimeTests
             );
         }
 
-
-        [UnityTest]
-        public IEnumerator NetworkListValueUpdate([Values(true, false)] bool useHost)
-        {
-            m_TestWithHost = useHost;
-            yield return MultiInstanceHelpers.RunAndWaitForCondition(
-                () =>
-                {
-                    m_Player1OnServer.TheList.Add(k_TestVal1);
-                },
-                () =>
-                {
-                    return m_Player1OnServer.TheList.Count == 1 &&
-                           m_Player1OnClient1.TheList.Count == 1 &&
-                           m_Player1OnServer.TheList[0] == k_TestVal1 &&
-                           m_Player1OnClient1.TheList[0] == k_TestVal1;
-                }
-            );
-
-            var testSucceeded = false;
-
-            void TestValueUpdatedCallback(NetworkListEvent<int> changedEvent)
-            {
-                testSucceeded = changedEvent.PreviousValue == k_TestVal1 &&
-                                changedEvent.Value == k_TestVal3;
-            }
-
-            try
-            {
-                yield return MultiInstanceHelpers.RunAndWaitForCondition(
-                    () =>
-                    {
-                        m_Player1OnServer.TheList[0] = k_TestVal3;
-                        m_Player1OnClient1.TheList.OnListChanged += TestValueUpdatedCallback;
-                    },
-                    () =>
-                    {
-                        return m_Player1OnServer.TheList.Count == 1 &&
-                               m_Player1OnClient1.TheList.Count == 1 &&
-                               m_Player1OnServer.TheList[0] == k_TestVal3 &&
-                               m_Player1OnClient1.TheList[0] == k_TestVal3;
-                    }
-                );
-            }
-            finally
-            {
-                m_Player1OnClient1.TheList.OnListChanged -= TestValueUpdatedCallback;
-            }
-
-            Assert.That(testSucceeded);
-        }
-
         [Test]
         public void NetworkListIEnumerator([Values(true, false)] bool useHost)
         {
@@ -503,28 +405,6 @@ namespace Unity.Netcode.RuntimeTests
                     return
                         m_Player1OnClient1.TheStruct.Value.SomeBool == false &&
                         m_Player1OnClient1.TheStruct.Value.SomeInt == k_TestUInt;
-                }
-            );
-        }
-
-        [UnityTest]
-        public IEnumerator TestINetworkSerializableCallsNetworkSerialize([Values(true, false)] bool useHost)
-        {
-            m_TestWithHost = useHost;
-            yield return MultiInstanceHelpers.RunAndWaitForCondition(
-                () =>
-                {
-                    TestStruct.NetworkSerializeCalledOnWrite = false;
-                    TestStruct.NetworkSerializeCalledOnRead = false;
-                    m_Player1OnServer.TheStruct.Value =
-                        new TestStruct() { SomeInt = k_TestUInt, SomeBool = false };
-                    m_Player1OnServer.TheStruct.SetDirty(true);
-                },
-                () =>
-                {
-                    return
-                        TestStruct.NetworkSerializeCalledOnWrite &&
-                        TestStruct.NetworkSerializeCalledOnRead;
                 }
             );
         }

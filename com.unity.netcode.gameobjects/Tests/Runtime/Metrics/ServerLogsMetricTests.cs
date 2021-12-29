@@ -11,13 +11,10 @@ namespace Unity.Netcode.RuntimeTests.Metrics
 {
     internal class ServerLogsMetricTests : SingleClientMetricTestBase
     {
-        // Header is dynamically sized due to packing, will be 2 bytes for all test messages.
-        private const int k_MessageHeaderSize = 2;
-        private static readonly int k_ServerLogSentMessageOverhead = 2 + k_MessageHeaderSize;
+        private static readonly int k_ServerLogSentMessageOverhead = 2 + FastBufferWriter.GetWriteSize<MessageHeader>();
         private static readonly int k_ServerLogReceivedMessageOverhead = 2;
 
         [UnityTest]
-        [Ignore("Snapshot transition")]
         public IEnumerator TrackServerLogSentMetric()
         {
             var waitForSentMetric = new WaitForMetricValues<ServerLogEvent>(ClientMetrics.Dispatcher, NetworkMetricTypes.ServerLogSent);
@@ -37,7 +34,6 @@ namespace Unity.Netcode.RuntimeTests.Metrics
         }
 
         [UnityTest]
-        [Ignore("Snapshot transition")]
         public IEnumerator TrackServerLogReceivedMetric()
         {
             var waitForReceivedMetric = new WaitForMetricValues<ServerLogEvent>(ServerMetrics.Dispatcher, NetworkMetricTypes.ServerLogReceived);

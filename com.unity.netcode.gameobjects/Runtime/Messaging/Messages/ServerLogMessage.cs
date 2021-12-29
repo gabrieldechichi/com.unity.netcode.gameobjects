@@ -17,25 +17,21 @@ namespace Unity.Netcode
             BytePacker.WriteValuePacked(writer, Message);
         }
 
-        public bool Deserialize(FastBufferReader reader, ref NetworkContext context)
+        public static void Receive(FastBufferReader reader, in NetworkContext context)
         {
             var networkManager = (NetworkManager)context.SystemOwner;
             if (networkManager.IsServer && networkManager.NetworkConfig.EnableNetworkLogs)
             {
-                reader.ReadValueSafe(out LogType);
-                ByteUnpacker.ReadValuePacked(reader, out Message);
-                return true;
+                var message = new ServerLogMessage();
+                reader.ReadValueSafe(out message.LogType);
+                ByteUnpacker.ReadValuePacked(reader, out message.Message);
+                message.Handle(context.SenderId, networkManager, reader.Length);
             }
-
-            return false;
         }
 
-        public void Handle(ref NetworkContext context)
+        public void Handle(ulong senderId, NetworkManager networkManager, int messageSize)
         {
-            var networkManager = (NetworkManager)context.SystemOwner;
-            var senderId = context.SenderId;
-
-            networkManager.NetworkMetrics.TrackServerLogReceived(senderId, (uint)LogType, context.MessageSize);
+            networkManager.NetworkMetrics.TrackServerLogReceived(senderId, (uint)LogType, messageSize);
 
             switch (LogType)
             {

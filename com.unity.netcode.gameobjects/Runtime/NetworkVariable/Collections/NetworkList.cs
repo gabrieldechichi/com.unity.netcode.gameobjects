@@ -272,13 +272,10 @@ namespace Unity.Netcode
                         {
                             reader.ReadValueSafe(out int index);
                             reader.ReadValueSafe(out T value);
-                            if (index >= m_List.Length)
+                            if (index < m_List.Length)
                             {
-                                throw new Exception("Shouldn't be here, index is higher than list length");
+                                m_List[index] = value;
                             }
-
-                            var previousValue = m_List[index];
-                            m_List[index] = value;
 
                             if (OnListChanged != null)
                             {
@@ -286,8 +283,7 @@ namespace Unity.Netcode
                                 {
                                     Type = eventType,
                                     Index = index,
-                                    Value = value,
-                                    PreviousValue = previousValue
+                                    Value = value
                                 });
                             }
 
@@ -297,8 +293,7 @@ namespace Unity.Netcode
                                 {
                                     Type = eventType,
                                     Index = index,
-                                    Value = value,
-                                    PreviousValue = previousValue
+                                    Value = value
                                 });
                             }
                         }
@@ -373,7 +368,7 @@ namespace Unity.Netcode
         public bool Contains(T item)
         {
             int index = NativeArrayExtensions.IndexOf(m_List, item);
-            return index != -1;
+            return index == -1;
         }
 
         /// <inheritdoc />
@@ -532,11 +527,6 @@ namespace Unity.Netcode
         /// The value changed, added or removed if available.
         /// </summary>
         public T Value;
-
-        /// <summary>
-        /// The previous value when "Value" has changed, if available.
-        /// </summary>
-        public T PreviousValue;
 
         /// <summary>
         /// the index changed, added or removed if available

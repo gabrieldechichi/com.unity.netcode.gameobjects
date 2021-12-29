@@ -8,7 +8,6 @@ using Unity.Collections;
 using Unity.Networking.Transport;
 using Unity.Networking.Transport.Relay;
 using Unity.Networking.Transport.Utilities;
-using Unity.Netcode.UTP.Utilities;
 
 namespace Unity.Netcode
 {
@@ -17,12 +16,7 @@ namespace Unity.Netcode
     /// </summary>
     public interface INetworkStreamDriverConstructor
     {
-        void CreateDriver(
-            UnityTransport transport,
-            out NetworkDriver driver,
-            out NetworkPipeline unreliableFragmentedPipeline,
-            out NetworkPipeline unreliableSequencedFragmentedPipeline,
-            out NetworkPipeline reliableSequencedFragmentedPipeline);
+        void CreateDriver(UnityTransport transport, out NetworkDriver driver, out NetworkPipeline unreliableSequencedPipeline, out NetworkPipeline reliableSequencedPipeline, out NetworkPipeline reliableSequencedFragmentedPipeline);
     }
 
     public static class ErrorUtilities
@@ -30,10 +24,9 @@ namespace Unity.Netcode
         private const string k_NetworkSuccess = "Success";
         private const string k_NetworkIdMismatch = "NetworkId is invalid, likely caused by stale connection {0}.";
         private const string k_NetworkVersionMismatch = "NetworkVersion is invalid, likely caused by stale connection {0}.";
-        private const string k_NetworkStateMismatch = "Sending data while connecting on connection {0} is not allowed.";
+        private const string k_NetworkStateMismatch = "Sending data while connecting on connectionId{0} is now allowed";
         private const string k_NetworkPacketOverflow = "Unable to allocate packet due to buffer overflow.";
-        private const string k_NetworkSendQueueFull = "Currently unable to queue packet as there is too many in-flight " +
-            " packets. This could be because the send queue size ('Max Send Queue Size') is too small.";
+        private const string k_NetworkSendQueueFull = "Currently unable to queue packet as there is too many inflight packets.";
         private const string k_NetworkHeaderInvalid = "Invalid Unity Transport Protocol header.";
         private const string k_NetworkDriverParallelForErr = "The parallel network driver needs to process a single unique connection per job, processing a single connection multiple times in a parallel for is not supported.";
         private const string k_NetworkSendHandleInvalid = "Invalid NetworkInterface Send Handle. Likely caused by pipeline send data corruption.";
@@ -84,9 +77,8 @@ namespace Unity.Netcode
             Connected,
         }
 
-        public const int InitialMaxPacketQueueSize = 128;
         public const int InitialBatchQueueSize = 6 * 1024;
-        public const int InitialMaxSendQueueSize = 16 * InitialBatchQueueSize;
+        public const int InitialMaxPacketSize = NetworkParameterConstants.MTU;
 
         private static ConnectionAddressData s_DefaultConnectionAddressData = new ConnectionAddressData()
         { Address = "127.0.0.1", Port = 7777 };
@@ -96,21 +88,17 @@ namespace Unity.Netcode
 #pragma warning restore IDE1006 // Naming Styles
         public INetworkStreamDriverConstructor DriverConstructor => s_DriverConstructor != null ? s_DriverConstructor : this;
 
-        [Tooltip("Which protocol should be selected (Relay/Non-Relay).")]
+        [Tooltip("Which protocol should be selected Relay/Non-Relay")]
         [SerializeField] private ProtocolType m_ProtocolType;
 
-        [Tooltip("The maximum amount of packets that can be in the internal send/receive queues. " +
-            "Basically this is how many packets can be sent/received in a single update/frame.")]
-        [SerializeField] private int m_MaxPacketQueueSize = InitialMaxPacketQueueSize;
+        [Tooltip("Maximum size in bytes for a given packet")]
+        [SerializeField] private int m_MaximumPacketSize = InitialMaxPacketSize;
 
-        [Tooltip("The maximum size of a batched send. The send queue accumulates messages and batches them together " +
-            "up to this size. This is effectively the maximum payload size that can be handled by the transport.")]
+        [Tooltip("The maximum amount of packets that can be in the send/recv queues")]
+        [SerializeField] private int m_MaxPacketQueueSize = 128;
+
+        [Tooltip("The maximum size in bytes of the send queue for batching Netcode events")]
         [SerializeField] private int m_SendQueueBatchSize = InitialBatchQueueSize;
-
-        [Tooltip("The maximum size in bytes of the transport send queue. The send queue accumulates messages for " +
-            "batching and stores messages when other internal send queues are full. If you routinely observe an " +
-            "error about too many in-flight packets, try increasing this.")]
-        [SerializeField] private int m_MaxSendQueueSize = InitialMaxSendQueueSize;
 
         [Tooltip("A timeout in milliseconds after which a heartbeat is sent if there is no activity.")]
         [SerializeField] private int m_HeartbeatTimeoutMS = NetworkParameterConstants.HeartbeatTimeoutMS;
@@ -121,10 +109,10 @@ namespace Unity.Netcode
         [Tooltip("The maximum amount of connection attempts we will try before disconnecting.")]
         [SerializeField] private int m_MaxConnectAttempts = NetworkParameterConstants.MaxConnectAttempts;
 
-        [Tooltip("A timeout in milliseconds indicating how long we will wait for a connection event, before we " +
-            "disconnect it. The connection needs to receive data from the connected endpoint within this timeout. " +
-            "Note that with heartbeats enabled, simply not sending any data will not be enough to trigger this " +
-            "timeout (since heartbeats count as connection events).")]
+        [Tooltip("A timeout in milliseconds indicating how long we will wait for a connection event, before we disconnect it. " +
+            "(The connection needs to receive data from the connected endpoint within this timeout." +
+            "Note that with heartbeats enabled, simply not" +
+            "sending any data will not be enough to trigger this timeout (since heartbeats count as connection event)")]
         [SerializeField] private int m_DisconnectTimeoutMS = NetworkParameterConstants.DisconnectTimeoutMS;
 
         [Serializable]
@@ -152,13 +140,13 @@ namespace Unity.Netcode
 
         private State m_State = State.Disconnected;
         private NetworkDriver m_Driver;
-        private NetworkSettings m_NetworkSettings;
+        private List<INetworkParameter> m_NetworkParameters;
         private byte[] m_MessageBuffer;
         private NetworkConnection m_ServerConnection;
         private ulong m_ServerClientId;
 
-        private NetworkPipeline m_UnreliableFragmentedPipeline;
-        private NetworkPipeline m_UnreliableSequencedFragmentedPipeline;
+        private NetworkPipeline m_UnreliableSequencedPipeline;
+        private NetworkPipeline m_ReliableSequencedPipeline;
         private NetworkPipeline m_ReliableSequencedFragmentedPipeline;
 
         public override ulong ServerClientId => m_ServerClientId;
@@ -207,16 +195,11 @@ namespace Unity.Netcode
         /// <summary>
         /// SendQueue dictionary is used to batch events instead of sending them immediately.
         /// </summary>
-        private readonly Dictionary<SendTarget, BatchedSendQueue> m_SendQueue = new Dictionary<SendTarget, BatchedSendQueue>();
+        private readonly Dictionary<SendTarget, SendQueue> m_SendQueue = new Dictionary<SendTarget, SendQueue>();
 
         private void InitDriver()
         {
-            DriverConstructor.CreateDriver(
-                this,
-                out m_Driver,
-                out m_UnreliableFragmentedPipeline,
-                out m_UnreliableSequencedFragmentedPipeline,
-                out m_ReliableSequencedFragmentedPipeline);
+            DriverConstructor.CreateDriver(this, out m_Driver, out m_UnreliableSequencedPipeline, out m_ReliableSequencedPipeline, out m_ReliableSequencedFragmentedPipeline);
         }
 
         private void DisposeDriver()
@@ -227,19 +210,27 @@ namespace Unity.Netcode
             }
         }
 
-        private NetworkPipeline SelectSendPipeline(NetworkDelivery delivery)
+        private NetworkPipeline SelectSendPipeline(NetworkDelivery delivery, int size)
         {
             switch (delivery)
             {
                 case NetworkDelivery.Unreliable:
-                    return m_UnreliableFragmentedPipeline;
+                    return NetworkPipeline.Null;
 
                 case NetworkDelivery.UnreliableSequenced:
-                    return m_UnreliableSequencedFragmentedPipeline;
+                    return m_UnreliableSequencedPipeline;
 
                 case NetworkDelivery.Reliable:
                 case NetworkDelivery.ReliableSequenced:
+                    return m_ReliableSequencedPipeline;
+
                 case NetworkDelivery.ReliableFragmentedSequenced:
+                    // No need to send on the fragmented pipeline if data is smaller than MTU.
+                    if (size < NetworkParameterConstants.MTU)
+                    {
+                        return m_ReliableSequencedPipeline;
+                    }
+
                     return m_ReliableSequencedFragmentedPipeline;
 
                 default:
@@ -262,7 +253,7 @@ namespace Unity.Netcode
                     return false;
                 }
 
-                m_NetworkSettings.WithRelayParameters(ref m_RelayServerData);
+                m_NetworkParameters.Add(new RelayNetworkParameter { ServerData = m_RelayServerData });
             }
             else
             {
@@ -416,49 +407,8 @@ namespace Unity.Netcode
             }
             else
             {
-                m_NetworkSettings.WithRelayParameters(ref m_RelayServerData);
+                m_NetworkParameters.Add(new RelayNetworkParameter { ServerData = m_RelayServerData });
                 return ServerBindAndListen(NetworkEndPoint.AnyIpv4);
-            }
-        }
-
-        // Send as many batched messages from the queue as possible.
-        private void SendBatchedMessages(SendTarget sendTarget, BatchedSendQueue queue)
-        {
-            var clientId = sendTarget.ClientId;
-            var connection = ParseClientId(clientId);
-            var pipeline = sendTarget.NetworkPipeline;
-
-            while (!queue.IsEmpty)
-            {
-                var result = m_Driver.BeginSend(pipeline, connection, out var writer);
-                if (result != (int)Networking.Transport.Error.StatusCode.Success)
-                {
-                    Debug.LogError("Error sending the message: " +
-                        ErrorUtilities.ErrorToString((Networking.Transport.Error.StatusCode)result, clientId));
-                    return;
-                }
-
-                var written = queue.FillWriter(ref writer);
-
-                result = m_Driver.EndSend(writer);
-                if (result == written)
-                {
-                    // Batched message was sent successfully. Remove it from the queue.
-                    queue.Consume(written);
-                }
-                else
-                {
-                    // Some error occured. If it's just the UTP queue being full, then don't log
-                    // anything since that's okay (the unsent message(s) are still in the queue
-                    // and we'll retry sending the later);
-                    if (result != (int)Networking.Transport.Error.StatusCode.NetworkSendQueueFull)
-                    {
-                        Debug.LogError("Error sending the message: " +
-                            ErrorUtilities.ErrorToString((Networking.Transport.Error.StatusCode)result, clientId));
-                    }
-
-                    return;
-                }
             }
         }
 
@@ -498,36 +448,38 @@ namespace Unity.Netcode
                     }
                 case TransportNetworkEvent.Type.Disconnect:
                     {
-                        if (m_ServerConnection.IsCreated)
-                        {
-                            m_ServerConnection = default;
-
-                            var reason = reader.ReadByte();
-                            if (reason == (byte)Networking.Transport.Error.DisconnectReason.MaxConnectionAttempts)
-                            {
-                                Debug.LogError("Client failed to connect to server");
-                            }
-                        }
-
                         InvokeOnTransportEvent(NetcodeNetworkEvent.Disconnect,
                             ParseClientId(networkConnection),
                             default(ArraySegment<byte>),
                             Time.realtimeSinceStartup);
+
+                        if (m_ServerConnection.IsCreated)
+                        {
+                            m_ServerConnection = default;
+                            if (m_Driver.GetConnectionState(m_ServerConnection) == NetworkConnection.State.Connecting)
+                            {
+                                Debug.LogError("Client failed to connect to server");
+                            }
+                        }
 
                         m_State = State.Disconnected;
                         return true;
                     }
                 case TransportNetworkEvent.Type.Data:
                     {
-                        var queue = new BatchedReceiveQueue(reader);
-
-                        while (!queue.IsEmpty)
+                        var isBatched = reader.ReadByte();
+                        if (isBatched == 1)
                         {
-                            InvokeOnTransportEvent(NetcodeNetworkEvent.Data,
-                                ParseClientId(networkConnection),
-                                queue.PopMessage(),
-                                Time.realtimeSinceStartup
-                            );
+                            while (reader.GetBytesRead() < reader.Length)
+                            {
+                                var payloadSize = reader.ReadInt();
+                                ReadData(payloadSize, ref reader, ref networkConnection);
+                            }
+                        }
+                        else // If is not batched, then read the entire buffer at once
+                        {
+                            var payloadSize = reader.ReadInt();
+                            ReadData(payloadSize, ref reader, ref networkConnection);
                         }
 
                         return true;
@@ -537,14 +489,33 @@ namespace Unity.Netcode
             return false;
         }
 
+        private unsafe void ReadData(int size, ref DataStreamReader reader, ref NetworkConnection networkConnection)
+        {
+            if (size > m_SendQueueBatchSize)
+            {
+                Debug.LogError($"The received message does not fit into the message buffer: {size} {m_SendQueueBatchSize}");
+            }
+            else
+            {
+                unsafe
+                {
+                    using var data = new NativeArray<byte>(size, Allocator.Temp);
+                    reader.ReadBytes(data);
+
+                    InvokeOnTransportEvent(NetcodeNetworkEvent.Data,
+                        ParseClientId(networkConnection),
+                        new ArraySegment<byte>(data.ToArray(), 0, size),
+                        Time.realtimeSinceStartup
+                    );
+                }
+            }
+        }
+
         private void Update()
         {
             if (m_Driver.IsCreated)
             {
-                foreach (var kvp in m_SendQueue)
-                {
-                    SendBatchedMessages(kvp.Key, kvp.Value);
-                }
+                FlushAllSendQueues();
 
                 m_Driver.ScheduleUpdate().Complete();
 
@@ -636,18 +607,23 @@ namespace Unity.Netcode
         {
             Debug.Assert(sizeof(ulong) == UnsafeUtility.SizeOf<NetworkConnection>(),
                 "Netcode connection id size does not match UTP connection id size");
+            Debug.Assert(m_MaximumPacketSize > 5, "Message buffer size must be greater than 5");
 
-            m_NetworkSettings = new NetworkSettings(Allocator.Persistent);
+            m_NetworkParameters = new List<INetworkParameter>();
 
-            // If the user sends a message of exactly m_SendQueueBatchSize in length, we need to
-            // account for the overhead of its length when we store it in the send queue.
-            var fragmentationCapacity = m_SendQueueBatchSize + BatchedSendQueue.PerMessageOverhead;
+            // If the user sends a message of exactly m_SendQueueBatchSize length, we'll need an
+            // extra byte to mark it as non-batched and 4 bytes for its length. If the user fills
+            // up the send queue to its capacity (batched messages total m_SendQueueBatchSize), we
+            // still need one extra byte to mark the payload as batched.
+            var fragmentationCapacity = m_SendQueueBatchSize + 1 + 4;
+            m_NetworkParameters.Add(new FragmentationUtility.Parameters() { PayloadCapacity = fragmentationCapacity });
 
-            m_NetworkSettings
-                .WithFragmentationStageParameters(payloadCapacity: fragmentationCapacity)
-                .WithBaselibNetworkInterfaceParameters(
-                    receiveQueueCapacity: m_MaxPacketQueueSize,
-                    sendQueueCapacity: m_MaxPacketQueueSize);
+            m_NetworkParameters.Add(new BaselibNetworkParameter()
+            {
+                maximumPayloadSize = (uint)m_MaximumPacketSize,
+                receiveQueueCapacity = m_MaxPacketQueueSize,
+                sendQueueCapacity = m_MaxPacketQueueSize
+            });
         }
 
         public override NetcodeNetworkEvent PollEvent(out ulong clientId, out ArraySegment<byte> payload, out float receiveTime)
@@ -660,27 +636,119 @@ namespace Unity.Netcode
 
         public override void Send(ulong clientId, ArraySegment<byte> payload, NetworkDelivery networkDelivery)
         {
-            if (payload.Count > m_SendQueueBatchSize)
-            {
-                Debug.LogError($"Payload of size {payload.Count} larger than configured 'Send Queue Batch Size' ({m_SendQueueBatchSize}).");
-                return;
-            }
-
-            var pipeline = SelectSendPipeline(networkDelivery);
+            var size = payload.Count + 1 + 4; // 1 extra byte for the channel and another 4 for the count of the data
+            var pipeline = SelectSendPipeline(networkDelivery, size);
 
             var sendTarget = new SendTarget(clientId, pipeline);
             if (!m_SendQueue.TryGetValue(sendTarget, out var queue))
             {
-                queue = new BatchedSendQueue(Math.Max(m_MaxSendQueueSize, m_SendQueueBatchSize));
+                queue = new SendQueue(m_SendQueueBatchSize);
                 m_SendQueue.Add(sendTarget, queue);
             }
 
-            if (!queue.PushMessage(payload))
+            var success = queue.AddEvent(payload);
+            if (!success) // No more room in the send queue for the message.
             {
-                Debug.LogError($"Couldn't add payload of size {payload.Count} to batched send queue. " +
-                    $"Perhaps configured 'Max Send Queue Size' ({m_MaxSendQueueSize}) is too small for workload.");
-                return;
+                // Flushing the send queue ensures we preserve the order of sends.
+                SendBatchedMessageAndClearQueue(sendTarget, queue);
+                Debug.Assert(queue.IsEmpty() == true);
+                queue.Clear();
+
+                // Try add the message to the queue as there might be enough room now that it's empty.
+                success = queue.AddEvent(payload);
+                if (!success) // Message is too large to fit in the queue. Shouldn't happen under normal operation.
+                {
+                    // If data is too large to be batched, flush it out immediately. This happens with large initial spawn packets from Netcode for Gameobjects.
+                    Debug.LogWarning($"Event of size {payload.Count} too large to fit in send queue (of size {m_SendQueueBatchSize}). Trying to send directly. This could be the initial payload!");
+                    Debug.Assert(networkDelivery == NetworkDelivery.ReliableFragmentedSequenced); // Messages like this, should always be sent via the fragmented pipeline.
+                    SendMessageInstantly(sendTarget.ClientId, payload, pipeline);
+                }
             }
+        }
+
+        private unsafe void SendBatchedMessage(ulong clientId, ref NativeArray<byte> data, NetworkPipeline pipeline)
+        {
+            var payloadSize = data.Length + 1; // One extra byte to mark whether this message is batched or not
+            var result = m_Driver.BeginSend(pipeline, ParseClientId(clientId), out var writer, payloadSize);
+            if (result == 0)
+            {
+                if (data.IsCreated)
+                {
+                    // This 1 byte indicates whether the message has been batched or not, in this case it is
+                    writer.WriteByte(1);
+                    writer.WriteBytes(data);
+                }
+
+                result = m_Driver.EndSend(writer);
+                if (result == payloadSize) // If the whole data fit, then we are done here
+                {
+                    return;
+                }
+            }
+
+            Debug.LogError($"Error sending the message: {ErrorUtilities.ErrorToString((Networking.Transport.Error.StatusCode)result, clientId)}");
+        }
+
+        private unsafe void SendMessageInstantly(ulong clientId, ArraySegment<byte> data, NetworkPipeline pipeline)
+        {
+            var payloadSize = data.Count + 1 + 4; // 1 byte to indicate if the message is batched and 4 for the payload size
+            var result = m_Driver.BeginSend(pipeline, ParseClientId(clientId), out var writer, payloadSize);
+
+            if (result == 0)
+            {
+                if (data.Array != null)
+                {
+                    writer.WriteByte(0); // This 1 byte indicates whether the message has been batched or not, in this case is not, as is sent instantly
+                    writer.WriteInt(data.Count);
+
+                    // Note: we are not writing the one byte for the channel and the other 4 for the data count as it will be handled by the queue
+                    unsafe
+                    {
+                        fixed (byte* dataPtr = &data.Array[data.Offset])
+                        {
+                            writer.WriteBytes(dataPtr, data.Count);
+                        }
+                    }
+                }
+
+                result = m_Driver.EndSend(writer);
+                if (result == payloadSize) // If the whole data fit, then we are done here
+                {
+                    return;
+                }
+            }
+
+            Debug.LogError($"Error sending the message: {ErrorUtilities.ErrorToString((Networking.Transport.Error.StatusCode)result, clientId)}");
+        }
+
+        /// <summary>
+        /// Flushes all send queues.
+        /// </summary>
+        private void FlushAllSendQueues()
+        {
+            foreach (var kvp in m_SendQueue)
+            {
+                if (kvp.Value.IsEmpty())
+                {
+                    continue;
+                }
+
+                SendBatchedMessageAndClearQueue(kvp.Key, kvp.Value);
+            }
+        }
+
+        private void SendBatchedMessageAndClearQueue(SendTarget sendTarget, SendQueue sendQueue)
+        {
+            NetworkPipeline pipeline = sendTarget.NetworkPipeline;
+            var payloadSize = sendQueue.Count + 1; // 1 extra byte to tell whether the message is batched or not
+            if (payloadSize > NetworkParameterConstants.MTU) // If this is bigger than MTU then force it to be sent via the FragmentedReliableSequencedPipeline
+            {
+                pipeline = SelectSendPipeline(NetworkDelivery.ReliableFragmentedSequenced, payloadSize);
+            }
+
+            var sendBuffer = sendQueue.GetData();
+            SendBatchedMessage(sendTarget.ClientId, ref sendBuffer, pipeline);
+            sendQueue.Clear();
         }
 
         public override bool StartClient()
@@ -718,15 +786,12 @@ namespace Unity.Netcode
                 return;
             }
 
-
             // Flush the driver's internal send queue. If we're shutting down because the
             // NetworkManager is shutting down, it probably has disconnected some peer(s)
             // in the process and we want to get these disconnect messages on the wire.
             m_Driver.ScheduleFlushSend(default).Complete();
 
             DisposeDriver();
-
-            m_NetworkSettings.Dispose();
 
             foreach (var queue in m_SendQueue.Values)
             {
@@ -740,87 +805,132 @@ namespace Unity.Netcode
             m_ServerClientId = 0;
         }
 
-        public void CreateDriver(UnityTransport transport, out NetworkDriver driver,
-            out NetworkPipeline unreliableFragmentedPipeline,
-            out NetworkPipeline unreliableSequencedFragmentedPipeline,
-            out NetworkPipeline reliableSequencedFragmentedPipeline)
+        public void CreateDriver(UnityTransport transport, out NetworkDriver driver, out NetworkPipeline unreliableSequencedPipeline, out NetworkPipeline reliableSequencedPipeline, out NetworkPipeline reliableSequencedFragmentedPipeline)
         {
-#if MULTIPLAYER_TOOLS
-            NetworkPipelineStageCollection.RegisterPipelineStage(new NetworkMetricsPipelineStage());
-#endif
-            var maxFrameTimeMS = 0;
+            var netParams = new NetworkConfigParameter
+            {
+                maxConnectAttempts = transport.m_MaxConnectAttempts,
+                connectTimeoutMS = transport.m_ConnectTimeoutMS,
+                disconnectTimeoutMS = transport.m_DisconnectTimeoutMS,
+                heartbeatTimeoutMS = transport.m_HeartbeatTimeoutMS,
+                maxFrameTimeMS = 0
+            };
 
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
-            maxFrameTimeMS = 100;
+            netParams.maxFrameTimeMS = 100;
 
             var simulatorParams = ClientSimulatorParameters;
-
-            m_NetworkSettings.AddRawParameterStruct(ref simulatorParams);
+            transport.m_NetworkParameters.Insert(0, simulatorParams);
 #endif
-            m_NetworkSettings.WithNetworkConfigParameters(
-                maxConnectAttempts: transport.m_MaxConnectAttempts,
-                connectTimeoutMS: transport.m_ConnectTimeoutMS,
-                disconnectTimeoutMS: transport.m_DisconnectTimeoutMS,
-                heartbeatTimeoutMS: transport.m_HeartbeatTimeoutMS,
-                maxFrameTimeMS: maxFrameTimeMS);
+            transport.m_NetworkParameters.Insert(0, netParams);
 
-            driver = NetworkDriver.Create(m_NetworkSettings);
-
+            if (transport.m_NetworkParameters.Count > 0)
+            {
+                driver = NetworkDriver.Create(transport.m_NetworkParameters.ToArray());
+            }
+            else
+            {
+                driver = NetworkDriver.Create();
+            }
 #if UNITY_EDITOR || DEVELOPMENT_BUILD
             if (simulatorParams.PacketDelayMs > 0 || simulatorParams.PacketDropInterval > 0)
             {
-                unreliableFragmentedPipeline = driver.CreatePipeline(
-                    typeof(FragmentationPipelineStage),
-                    typeof(SimulatorPipelineStage),
-                    typeof(SimulatorPipelineStageInSend));
-                unreliableSequencedFragmentedPipeline = driver.CreatePipeline(
-                    typeof(FragmentationPipelineStage),
+                unreliableSequencedPipeline = driver.CreatePipeline(
                     typeof(UnreliableSequencedPipelineStage),
                     typeof(SimulatorPipelineStage),
-                    typeof(SimulatorPipelineStageInSend)
-#if MULTIPLAYER_TOOLS
-                    ,typeof(NetworkMetricsPipelineStage)
-#endif
-                    );
+                    typeof(SimulatorPipelineStageInSend));
+                reliableSequencedPipeline = driver.CreatePipeline(
+                    typeof(ReliableSequencedPipelineStage),
+                    typeof(SimulatorPipelineStage),
+                    typeof(SimulatorPipelineStageInSend));
                 reliableSequencedFragmentedPipeline = driver.CreatePipeline(
                     typeof(FragmentationPipelineStage),
                     typeof(ReliableSequencedPipelineStage),
                     typeof(SimulatorPipelineStage),
-                    typeof(SimulatorPipelineStageInSend)
-#if MULTIPLAYER_TOOLS
-                    ,typeof(NetworkMetricsPipelineStage)
-#endif
-                    );
+                    typeof(SimulatorPipelineStageInSend));
             }
             else
 #endif
             {
-
-                unreliableFragmentedPipeline = driver.CreatePipeline(
-                    typeof(FragmentationPipelineStage)
-#if MULTIPLAYER_TOOLS
-                    ,typeof(NetworkMetricsPipelineStage)
-#endif
-                );
-                unreliableSequencedFragmentedPipeline = driver.CreatePipeline(
-                    typeof(FragmentationPipelineStage),
-                    typeof(UnreliableSequencedPipelineStage)
-#if MULTIPLAYER_TOOLS
-                    ,typeof(NetworkMetricsPipelineStage)
-#endif
-                );
+                unreliableSequencedPipeline = driver.CreatePipeline(typeof(UnreliableSequencedPipelineStage));
+                reliableSequencedPipeline = driver.CreatePipeline(typeof(ReliableSequencedPipelineStage));
                 reliableSequencedFragmentedPipeline = driver.CreatePipeline(
-                    typeof(FragmentationPipelineStage),
-                    typeof(ReliableSequencedPipelineStage)
-#if MULTIPLAYER_TOOLS
-                    ,typeof(NetworkMetricsPipelineStage)
-#endif
+                    typeof(FragmentationPipelineStage), typeof(ReliableSequencedPipelineStage)
                 );
             }
         }
 
         // -------------- Utility Types -------------------------------------------------------------------------------
 
+        /// <summary>
+        /// Memory Stream controller to store several events into one single buffer
+        /// </summary>
+        private class SendQueue : IDisposable
+        {
+            private NativeArray<byte> m_Array;
+            private DataStreamWriter m_Stream;
+
+            /// <summary>
+            /// The size of the send queue.
+            /// </summary>
+            public int Size { get; }
+
+            public SendQueue(int size)
+            {
+                Size = size;
+                m_Array = new NativeArray<byte>(size, Allocator.Persistent);
+                m_Stream = new DataStreamWriter(m_Array);
+            }
+
+            /// <summary>
+            /// Ads an event to the send queue.
+            /// </summary>
+            /// <param name="data">The data to send.</param>
+            /// <returns>True if the event was added successfully to the queue. False if there was no space in the queue.</returns>
+            internal bool AddEvent(ArraySegment<byte> data)
+            {
+                // Check if we are about to write more than the buffer can fit
+                // Note: 4 bytes for the count of data
+                if (m_Stream.Length + data.Count + 4 > Size)
+                {
+                    return false;
+                }
+
+                m_Stream.WriteInt(data.Count);
+
+                unsafe
+                {
+                    fixed (byte* byteData = data.Array)
+                    {
+                        m_Stream.WriteBytes(byteData, data.Count);
+                    }
+                }
+
+                return true;
+            }
+
+            internal void Clear()
+            {
+                m_Stream.Clear();
+            }
+
+            internal bool IsEmpty()
+            {
+                return m_Stream.Length == 0;
+            }
+
+            internal int Count => m_Stream.Length;
+
+            internal NativeArray<byte> GetData()
+            {
+                return m_Stream.AsNativeArray();
+            }
+
+            public void Dispose()
+            {
+                m_Array.Dispose();
+            }
+        }
 
         /// <summary>
         /// Cached information about reliability mode with a certain client

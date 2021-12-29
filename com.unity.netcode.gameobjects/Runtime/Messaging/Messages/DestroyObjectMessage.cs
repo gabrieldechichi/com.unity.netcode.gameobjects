@@ -9,20 +9,19 @@ namespace Unity.Netcode
             writer.WriteValueSafe(this);
         }
 
-        public bool Deserialize(FastBufferReader reader, ref NetworkContext context)
+        public static void Receive(FastBufferReader reader, in NetworkContext context)
         {
             var networkManager = (NetworkManager)context.SystemOwner;
             if (!networkManager.IsClient)
             {
-                return false;
+                return;
             }
-            reader.ReadValueSafe(out this);
-            return true;
+            reader.ReadValueSafe(out DestroyObjectMessage message);
+            message.Handle(context.SenderId, networkManager, reader.Length);
         }
 
-        public void Handle(ref NetworkContext context)
+        public void Handle(ulong senderId, NetworkManager networkManager, int messageSize)
         {
-            var networkManager = (NetworkManager)context.SystemOwner;
             if (!networkManager.SpawnManager.SpawnedObjects.TryGetValue(NetworkObjectId, out var networkObject))
             {
                 // This is the same check and log message that happens inside OnDespawnObject, but we have to do it here
@@ -35,7 +34,7 @@ namespace Unity.Netcode
                 return;
             }
 
-            networkManager.NetworkMetrics.TrackObjectDestroyReceived(context.SenderId, networkObject, context.MessageSize);
+            networkManager.NetworkMetrics.TrackObjectDestroyReceived(senderId, networkObject, messageSize);
             networkManager.SpawnManager.OnDespawnObject(networkObject, true);
         }
     }

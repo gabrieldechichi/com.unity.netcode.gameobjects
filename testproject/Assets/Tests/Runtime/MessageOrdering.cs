@@ -101,7 +101,6 @@ namespace TestProject.RuntimeTests
         }
 
         [UnityTest]
-        [Ignore("Snapshot transition")]
         public IEnumerator SpawnRpcDespawn()
         {
             // Must be 1 for this test.
@@ -222,9 +221,6 @@ namespace TestProject.RuntimeTests
             serverNetworkObject.NetworkManagerOwner = server;
             serverNetworkObject.Spawn();
 
-            var nextFrameNumber = Time.frameCount + 3;
-            yield return new WaitUntil(() => Time.frameCount >= nextFrameNumber);
-
             // Wait until all objects have spawned.
             const int maxFrames = 240;
             var doubleCheckTime = Time.realtimeSinceStartup + 5.0f;
@@ -240,13 +236,13 @@ namespace TestProject.RuntimeTests
                         break;
                     }
                 }
-                nextFrameNumber = Time.frameCount + 1;
+                var nextFrameNumber = Time.frameCount + 1;
                 yield return new WaitUntil(() => Time.frameCount >= nextFrameNumber);
             }
 
             Assert.True(handler.WasSpawned);
             Assert.True(Support.SpawnRpcDespawn.ClientNetworkSpawnRpcCalled);
-            var lastFrameNumber = Time.frameCount + 3;
+            var lastFrameNumber = Time.frameCount + 1;
             Object.Destroy(serverObject);
             yield return new WaitUntil(() => Time.frameCount >= lastFrameNumber);
             Assert.True(handler.WasDestroyed);

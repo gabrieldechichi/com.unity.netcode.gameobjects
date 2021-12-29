@@ -9,22 +9,21 @@ namespace Unity.Netcode
             writer.WriteValueSafe(this);
         }
 
-        public bool Deserialize(FastBufferReader reader, ref NetworkContext context)
+        public static void Receive(FastBufferReader reader, in NetworkContext context)
         {
             var networkManager = (NetworkManager)context.SystemOwner;
             if (!networkManager.IsClient)
             {
-                return false;
+                return;
             }
-            reader.ReadValueSafe(out this);
-            return true;
+            reader.ReadValueSafe(out TimeSyncMessage message);
+            message.Handle(context.SenderId, networkManager);
         }
 
-        public void Handle(ref NetworkContext context)
+        public void Handle(ulong senderId, NetworkManager networkManager)
         {
-            var networkManager = (NetworkManager)context.SystemOwner;
             var time = new NetworkTime(networkManager.NetworkTickSystem.TickRate, Tick);
-            networkManager.NetworkTimeSystem.Sync(time.Time, networkManager.NetworkConfig.NetworkTransport.GetCurrentRtt(context.SenderId) / 1000d);
+            networkManager.NetworkTimeSystem.Sync(time.Time, networkManager.NetworkConfig.NetworkTransport.GetCurrentRtt(senderId) / 1000d);
         }
     }
 }

@@ -86,13 +86,13 @@ namespace Unity.Netcode.RuntimeTests.Metrics
             var clientPlayer = new MultiInstanceHelpers.CoroutineResultWrapper<NetworkObject>();
             yield return MultiInstanceHelpers.Run(MultiInstanceHelpers.GetNetworkObjectByRepresentation(x => x.IsPlayerObject && x.OwnerClientId == Client.LocalClientId, Server, clientPlayer));
 
-            var waitForClientMetricsValues = new WaitForMetricValues<RpcEvent>(ClientMetrics.Dispatcher, NetworkMetricTypes.RpcReceived);
+            var waitForServerMetricsValues = new WaitForMetricValues<RpcEvent>(ServerMetrics.Dispatcher, NetworkMetricTypes.RpcReceived);
 
             clientPlayer.Result.GetComponent<RpcTestComponent>().MyClientRpc();
 
-            yield return waitForClientMetricsValues.WaitForMetricsReceived();
+            yield return waitForServerMetricsValues.WaitForMetricsReceived();
 
-            var clientRpcReceivedValues = waitForClientMetricsValues.AssertMetricValuesHaveBeenFound();
+            var clientRpcReceivedValues = waitForServerMetricsValues.AssertMetricValuesHaveBeenFound();
             Assert.AreEqual(1, clientRpcReceivedValues.Count);
 
             var rpcReceived = clientRpcReceivedValues.First();
